@@ -1,0 +1,34 @@
+{
+  "name": "amqp-simple",
+  "version": "1.0.0",
+  "description": "Simplified amqp messgaging that supports retries and dead letter queues",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "mocha test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jsonxr/node-amqp-simple.git"
+  },
+  "keywords": [
+    "ampq",
+    "messaging",
+    "rabbitmq",
+    "retry",
+    "deadletter"
+  ],
+  "author": "Jason Rowland <jason@snowcapstudios.com> (http://www.jasonrowland.com/)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jsonxr/node-amqp-simple/issues"
+  },
+  "homepage": "https://github.com/jsonxr/node-amqp-simple",
+  "dependencies": {
+    "amqp": "^0.2.4",
+    "async": "^1.4.2",
+    "q": "^1.4.1"
+  },
+  "devDependencies": {
+    "mocha": "^2.2.5"
+  }
+}
