@@ -171,7 +171,7 @@ Connection.prototype.subscribe = function subscribe(options, callback) {
   // Must handle message in this amount of time by default
   handler.timeout = options.timeout || DEFAULT_TIMEOUT_MS;
   
-  //me._bindToQueue(me._deadExchange, 'dead.' + consumer, routingKey);
+  me._bindToQueue(me._deadExchange, 'dead.' + consumer, routingKey);
   me._bindToQueue(me._exchange, consumer, routingKey, function (err, q) {
     // Catch all messages for the routingKey
     var s = q.subscribe({
