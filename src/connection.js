@@ -387,7 +387,7 @@ Connection.prototype.publish = function (options, callback) {
   });
 
   if (!callback) {
-    deferred.promise;
+    return deferred.promise;
   }
 }
 
