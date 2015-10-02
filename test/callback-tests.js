@@ -9,19 +9,20 @@ describe("amqp-simple - callback API", function () {
 
   before(function (done) {
     connection = new amqp.Connection({ 
-      url: 'amqp://dockerhost',
-      logger: function () {}  // ignore all logging
+      url: 'amqp://dockerhost'
     });
     connection.open(function (err) {
       done(err);
     });
   });
   
-  after(function () {
-    if (connection) {
-      connection.close();
-    }
-  })
+  // after(function (done) {
+  //   if (connection) {
+  //     connection.close(function () {
+  //       done();
+  //     });
+  //   }
+  // })
   
   function getRoutingKey() {
     var routingKey = 'example' + (new Date).getTime();
@@ -156,7 +157,6 @@ describe("amqp-simple - callback API", function () {
       timeout: 100,
       handler: function (msg, callback) {
         if (msg.headers['x-retry-count'] === 0) {
-          callback();
           if (count === 2) {
             // count equals initial request plus 2 retries
             done();
@@ -165,7 +165,7 @@ describe("amqp-simple - callback API", function () {
           }
         } else {
           count = count + 1;
-          setTimeout(callback, 10000);
+          setTimeout(callback, 1000);
         }
       }
     }, function () {
@@ -228,7 +228,87 @@ describe("amqp-simple - callback API", function () {
     });
     
   });
-   
+
+  it("should move to dead queue when fails", function (done) {
+    var routingKey = getRoutingKey();
+    var deadKey = routingKey + '.dead';
+    var state = 'start';
+
+    var count = 0;
+    connection.subscribe({
+      routingKey: routingKey,
+      consumer: 'consumer5',
+      handler: function (msg, callback) {
+        throw new Error("exception in handler");
+      },
+      dead: function (msg, callback) {
+        assert.equal(msg.body.two, 'two');
+        callback();
+        done();
+      }
+    }, function () {
+      state = 'start';
+      connection.publish({
+        routingKey: routingKey,
+        body: {
+          two: 'two'
+        },
+        headers: {
+          'x-retry-count': 0,
+          'x-retry-delay-ms': 50
+        }
+      });
+      
+    });
+  });
+
+  it("should retry dead messages", function (done) {
+    var routingKey = getRoutingKey();
+    var deadKey = routingKey + '.dead';
+    var state = 'dead';
+
+    var count = 0;
+    
+    function publishDead(callback) {
+      // Publish a message that dies!
+      connection.subscribe({
+        routingKey: routingKey,
+        consumer: 'test-dead',
+        handler: function (msg, cb) {
+          callback();
+          throw new Error("exception in handler");
+        }
+      }, function () {
+        state = 'start';
+        connection.publish({
+          routingKey: routingKey,
+          body: {
+            two: 'two'
+          },
+          headers: {
+            'x-retry-count': 0,
+            'x-retry-delay-ms': 50
+          }
+        });
+      });
+    }
+    
+    publishDead(function () {
+      connection.subscribe({
+        routingKey: routingKey,
+        consumer: 'test-dead',
+        dead: function (msg, callback) {
+          console.log('dead received! ', msg);
+          assert.equal(msg.body.two, 'two');
+          callback();
+          done();
+        }
+      }, function () {
+        // ?
+      });
+    })
+  });
+  
 });
 
 

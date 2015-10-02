@@ -58,15 +58,14 @@ Connection.prototype.open = function open(callback) {
     _onready(me, callback, deferred);
   });
   me._connection.on('basicQosOk', function (data) {
-    console.log('basicQosOk: ', data);
+    me.logger.info('basicQosOk: ', data);
   })
   // Handle error as failure
   me._connection.on('error', function (err) {
     if (! me.connected) {
       _onerror(me, callback, deferred, err);
     } else {
-      me.logger.error('amq-simple: connection.onerror');
-      console.dir(err);
+      me.logger.error('amq-simple: connection.onerror', err);
       me.logger.error(err);
     }
   });
@@ -125,10 +124,11 @@ Connection.prototype.close = function close(callback) {
   var me = this;
   me._connection.removeAllListeners('error');
   me._connection.disconnect();
-  // disconnect doesn't work quite right in the amqp module
-  if (callback) {
-    callback();
-  }
+  me._connection.once('close', function () {
+    if (callback) {
+      callback();
+    }
+  });
 }
 
 
@@ -161,39 +161,62 @@ Connection.prototype.subscribe = function subscribe(options, callback) {
   // Assert what we believe to be true
   assert(options.routingKey, 'routingKey is required.');
   assert(options.consumer, 'consumer is required');
-  assert(options.handler, 'handler is required');
+  assert(options.handler || options.dead, 'Either handler or dead is required');
   assert(me._deadExchange);
   assert(me._exchange);
   // Convenience variables
   var routingKey = options.routingKey;
   var consumer = options.consumer;
   var handler = options.handler;
-  // Must handle message in this amount of time by default
-  handler.timeout = options.timeout || DEFAULT_TIMEOUT_MS;
+  var dead = options.dead;
+  var prefetchCount = options.prefetchCount || 1;
   
-  me._bindToQueue(me._deadExchange, 'dead.' + consumer, routingKey);
-  me._bindToQueue(me._exchange, consumer, routingKey, function (err, q) {
-    // Catch all messages for the routingKey
-    var s = q.subscribe({
-      ack: true,
-      prefetchCount: 0 // 1
-    }, function (body, headers, deliveryInfo, ack) {
-      me.logger.debug('amq-simple: received message for ' + 
-          deliveryInfo.routingKey);
-      var msg = {
-        body: body,
-        headers: headers,
-        routingKey: deliveryInfo.routingKey
-      }
-      me.logger.debug(msg);
-      me._amqpHandleMessage(msg, me._exchange, me._deadExchange, ack, handler);
-    }).addCallback(function subscribed(ok){
-      if (callback) {
-        callback();
-      }
-    });
+  me._bindToQueue(me._deadExchange, 'dead.' + consumer, routingKey, function (err, q) {
+    if (dead) {
+      var s = q.subscribe({
+        ack: true,
+        prefetchCount: prefetchCount
+      }, function (body, headers, deliveryInfo, ack) {
+        var msg = {
+          body: body,
+          headers: headers,
+          routingKey: deliveryInfo.routingKey
+        }
+        me.logger.debug('amqp-simple: received dead message: ', msg);
+        dead(msg, function (err) {
+          if (! err) {
+            ack.acknowledge(false); // only ack this one message
+          }
+        })
+      });
+    }
   });
-  
+
+  me._bindToQueue(me._exchange, consumer, routingKey, function (err, q) {
+    if (handler) {
+      // Must handle message in this amount of time by default
+      handler.timeout = options.timeout || DEFAULT_TIMEOUT_MS;
+      // Catch all messages for the routingKey
+      var s = q.subscribe({
+        ack: true,
+        prefetchCount: prefetchCount
+      }, function (body, headers, deliveryInfo, ack) {
+        me.logger.debug('amq-simple: received message for ' +
+            deliveryInfo.routingKey);
+        var msg = {
+          body: body,
+          headers: headers,
+          routingKey: deliveryInfo.routingKey
+        }
+        me.logger.debug(msg);
+        me._amqpHandleMessage(msg, me._exchange, me._deadExchange, ack, handler);
+      }).addCallback(function subscribed(ok){
+        if (callback) {
+          callback();
+        }
+      });
+    }
+  });
 }
 
 // Publish a message to the amqp server
@@ -327,6 +350,35 @@ function _setDefaultHeaders(headers) {
   _setDefaultHeader(headers, 'x-retry-delay-ms', DEFAULT_RETRY_DELAY_MS);
   _setDefaultHeader(headers, 'x-timeout-ms', DEFAULT_TIMEOUT_MS);
   return headers;
+}
+
+
+Connection.prototype.retryDead = function retryDead(options) {
+  var consumer = options.consumer;
+  var routingKey = options.routingKey;
+  var me = this;
+  me._bindToQueue(me._deadExchange, 'dead.' + consumer, routingKey, function (err, q) {
+    var s = q.subscribe({
+      ack: true,
+      prefetchCount: 0
+    }, function (body, headers, deliveryInfo, ack) {
+      var msg = {
+        body: body,
+        headers: headers,
+        routingKey: deliveryInfo.routingKey
+      }
+      me.logger.debug('dead retry: ', msg);
+      var options = {
+        headers: msg.headers
+      };
+      me._amqpPublish({
+        exchange: me._exchange,
+        routingKey: msg.routingKey,
+        body: msg.body,
+        options: options
+      });
+    })
+  });
 }
 
 
